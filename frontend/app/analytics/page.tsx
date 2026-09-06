@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AuthGate } from '@/components/ui/AuthGate';
 import { PracticeShell } from '@/components/practice/PracticeShell';
 import { ANALYTICS as A } from '@/lib/mockData';
 
@@ -11,6 +12,14 @@ const TONE = {
 };
 
 export default function AnalyticsPage() {
+  return (
+    <AuthGate role="individual">
+      <AnalyticsPageContent />
+    </AuthGate>
+  );
+}
+
+function AnalyticsPageContent() {
   // The design pack includes a loading state for this screen, so it gets one.
   const [ready, setReady] = useState(false);
   useEffect(() => { const t = setTimeout(() => setReady(true), 550); return () => clearTimeout(t); }, []);

@@ -48,27 +48,41 @@ _ROLE_DOMAINS = {
 _BOUNDARIES = {
     SpecialistDomain.DSA: (
         "You are the DSA specialist. Discuss algorithms, data structures, code correctness, "
-        "complexity and edge cases only. Do not ask HR, product or system-design questions."
+        "complexity and edge cases ONLY. Never ask about, comment on, or follow up on HR, "
+        "behavioural, product, customer or system-design topics - not even conversationally, "
+        "and not even if the candidate raises them. If the candidate goes off-topic, "
+        "acknowledge briefly in one clause and steer straight back to your own domain."
     ),
     SpecialistDomain.SYSTEM_DESIGN: (
         "You are the system-design specialist. Discuss requirements, APIs, data models, "
-        "architecture, scale, reliability and trade-offs only. Do not ask coding or HR questions."
+        "architecture, scale, reliability and trade-offs ONLY. Never ask about, comment on, "
+        "or follow up on coding puzzles, HR, behavioural or product topics - not even "
+        "conversationally, and not even if the candidate raises them. If the candidate goes "
+        "off-topic, acknowledge briefly in one clause and steer straight back to your own domain."
     ),
     SpecialistDomain.BEHAVIOURAL: (
-        "You are the HR and communication specialist. Ask only behavioural, collaboration, "
-        "leadership and communication questions. Never ask coding, algorithms or system design."
+        "You are the HR and communication specialist. Ask ONLY behavioural, collaboration, "
+        "leadership and communication questions. Never ask about, comment on, or evaluate "
+        "code, algorithms, complexity or system design - not even conversationally, and not "
+        "even if the candidate raises them. If the candidate starts explaining technical "
+        "detail, acknowledge briefly and redirect to how they worked with people on it."
     ),
     SpecialistDomain.PRODUCT: (
-        "You are the product specialist. Ask only product judgement, prioritisation, metrics, "
-        "execution and collaboration questions. Do not ask coding questions."
+        "You are the product specialist. Ask ONLY product judgement, prioritisation, metrics, "
+        "user impact and execution questions. Never ask about, comment on, or evaluate code, "
+        "algorithms or system internals - not even conversationally. If the candidate "
+        "explains implementation, acknowledge briefly and redirect to user or business impact."
     ),
     SpecialistDomain.CUSTOMER: (
         "You are the customer-role specialist. Stay within the configured customer scenario "
         "and evaluate empathy, discovery and communication. Do not ask unrelated technical questions."
     ),
     SpecialistDomain.TECHNICAL: (
-        "You are a technical specialist. Ask only engineering, programming and architecture questions "
-        "from your assigned bank. Do not ask behavioural, culture-fit or HR questions."
+        "You are a technical specialist. Ask ONLY engineering, programming and architecture "
+        "questions from your assigned bank. Never ask about, comment on, or evaluate "
+        "behavioural, culture-fit, HR, product or customer topics - not even conversationally, "
+        "and not even if the candidate raises them. If the candidate drifts into how they "
+        "worked with their team, acknowledge in one clause and return to the technical content."
     ),
     SpecialistDomain.CUSTOM: (
         "Stay strictly inside this interviewer's configured scenario and assigned question bank. "
@@ -97,11 +111,36 @@ _DOMAINS: dict[SpecialistDomain, frozenset[QuestionDomain]] = {
 }
 
 _DOMAIN_MARKERS: tuple[tuple[QuestionDomain, re.Pattern[str]], ...] = (
-    ("behavioural", re.compile(r"\b(behavio(?:u)?ral|tell me about|describe a time|conflict|collaboration|leadership|ownership|mistake|feedback|team fit|culture fit)\b", re.I)),
-    ("system_design", re.compile(r"\b(system design|architecture|scalab|distributed system|design (?:a|an|the)|data model|availability|reliability)\b", re.I)),
-    ("dsa", re.compile(r"\b(dsa|algorithm|data structure|complexity|array|linked list|stack|queue|tree|graph|dynamic programming|binary search|implement)\b", re.I)),
-    ("product", re.compile(r"\b(product sense|prioriti[sz]|roadmap|product metric|user retention|go.to.market)\b", re.I)),
-    ("customer", re.compile(r"\b(customer|client|objection|discovery call|stakeholder need)\b", re.I)),
+    # Order matters: the first pattern to match wins. People-domains are tested
+    # first so a question about working with a team is never read as technical.
+    #
+    # These are deliberately broad. Anything that matches nothing falls through
+    # to "general", and "general" is accepted by several specialist roles - so a
+    # narrow behavioural pattern is exactly how an HR question reaches the DSA
+    # interviewer. Widening these is the real domain guard.
+    ("behavioural", re.compile(
+        r"\b(behavio(?:u)?ral|tell me about|describe a time|walk me through a time|"
+        r"give me an example of a time|conflict|disagree(?:d|ment)?|collaborat|"
+        r"leadership|led a team|ownership|mistake|failure|feedback|team fit|culture fit|"
+        r"your strengths?|your weakness(?:es)?|why do you want|career goal|"
+        r"under pressure|tight deadline|difficult (?:colleague|teammate|manager|stakeholder)|"
+        r"motivat(?:es|ion)|proud of|handled? a situation|work(?:ed|ing) with others)\b", re.I)),
+    ("customer", re.compile(
+        r"\b(customer|client|objection|escalat|complaint|renewal|churn risk|"
+        r"discovery call|stakeholder need|angry user|support ticket)\b", re.I)),
+    ("product", re.compile(
+        r"\b(product sense|prioriti[sz]|roadmap|product metric|north star|"
+        r"user retention|go.to.market|a/b test|experiment design|feature request|"
+        r"success metric|adoption|segmentation|build.{0,6}buy)\b", re.I)),
+    ("system_design", re.compile(
+        r"\b(system design|architecture|scalab|distributed system|design (?:a|an|the)|"
+        r"data model|availability|reliability|load balanc|shard|microservice|"
+        r"replication|throughput|fault toleran|high availability)\b", re.I)),
+    ("dsa", re.compile(
+        r"\b(dsa|algorithm|data structure|complexity|big.?o|time complexity|"
+        r"space complexity|array|linked list|stack|queue|tree|graph|hash|heap|"
+        r"recursion|traversal|two pointer|sliding window|dynamic programming|"
+        r"binary search|sort(?:ing)?|implement)\b", re.I)),
 )
 
 

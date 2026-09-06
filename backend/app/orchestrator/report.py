@@ -70,12 +70,15 @@ def build_report(state: SessionState, panel: Panel) -> InterviewReport:
     # name -> (best score, the agents that checked it)
     best: dict[str, float] = {}
     checked_by: dict[str, list[str]] = {}
+    assessed: set[str] = set()
 
     for agent_id, agent_state in state.agent_states.items():
         agent_name = agents_by_id[agent_id].identity.name if agent_id in agents_by_id else agent_id
         for name, cs in agent_state.competency_scores.items():
             if cs.score > best.get(name, -1.0):
                 best[name] = cs.score
+            if cs.assessed:
+                assessed.add(name)
             checked_by.setdefault(name, []).append(agent_name)
 
     competencies: list[CompetencyResult] = []
@@ -90,12 +93,13 @@ def build_report(state: SessionState, panel: Panel) -> InterviewReport:
             threshold=threshold,
             weight=weight,
             covered=score >= threshold,
+            assessed=name in assessed,
             checked_by=sorted(set(checked_by.get(name, []))),
             # Flagged so a reader can tell a real threshold from a silent default.
             used_default_rule=rule is None,
         ))
 
-    covered_count = sum(1 for c in competencies if c.covered)
+    covered_count = sum(1 for c in competencies if c.covered and c.assessed)
 
     # ---- knowledge-base coverage, when there was a knowledge base ----------
     coverages = [t.coverage for t in state.transcript if t.coverage is not None]
@@ -112,7 +116,13 @@ def build_report(state: SessionState, panel: Panel) -> InterviewReport:
             1 for t in state.transcript
             if t.agent_id == agent_id and t.speaker == "candidate"
         )
-        raw_scores = [item.score for item in agent_state.competency_scores.values()]
+        # Only competencies this agent actually scored. seed_agent_states()
+        # pre-creates a 0.0 placeholder for every declared competency, so
+        # averaging the raw dict scored an agent that never spoke as a zero and
+        # halved the overall for any interview that ended early.
+        raw_scores = [
+            item.score for item in agent_state.competency_scores.values() if item.assessed
+        ]
         agent_score = sum(raw_scores) / len(raw_scores) if raw_scores else 0.0
         if agent.scoring.weight is not None:
             agent_weight = agent.scoring.weight
@@ -123,7 +133,12 @@ def build_report(state: SessionState, panel: Panel) -> InterviewReport:
                 for name in agent.scoring.competencies
                 if name in rules
             ) or 1.0
-        weighted_agent_scores.append((agent_score, agent_weight))
+        # No evidence at all -> this agent is not part of the recommendation.
+        # Contributing 0.0 would punish the candidate for an interview that
+        # simply never reached this interviewer.
+        contributed = bool(raw_scores)
+        if contributed:
+            weighted_agent_scores.append((agent_score, agent_weight))
         agent_reports.append(AgentReport(
             agent_id=agent_id,
             name=agent.identity.name,
@@ -132,7 +147,9 @@ def build_report(state: SessionState, panel: Panel) -> InterviewReport:
             questions_answered=asked,
             satisfaction=round(agent_state.assessment_satisfaction, 3),
             score=round(agent_score, 3),
-            weight=round(agent_weight, 3),
+            # An agent with no evidence is not in the weighted mean, so showing
+            # it a share of the score would misdescribe the recommendation.
+            weight=round(agent_weight, 3) if contributed else 0.0,
             force_closed=agent_state.force_closed,
             competencies=sorted(agent_state.competency_scores.keys()),
             knowledge_questions_asked=len(agent_state.asked_item_ids),
@@ -150,9 +167,14 @@ def build_report(state: SessionState, panel: Panel) -> InterviewReport:
         sum(score * weight for score, weight in weighted_agent_scores) / agent_weight_sum
         if agent_weight_sum > 0 else 0.0
     )
+    # interview_reports.overall_score is numeric(6,5) with a 0-1 CHECK. Anything
+    # outside that range is rejected by Postgres and the report is lost, so the
+    # clamp belongs here rather than at the call site.
+    overall = max(0.0, min(1.0, overall))
     if agent_weight_sum > 0:
         for agent_report in agent_reports:
-            agent_report.weight = round(agent_report.weight / agent_weight_sum, 3)
+            if agent_report.weight:
+                agent_report.weight = round(agent_report.weight / agent_weight_sum, 3)
 
     # ---- flags raised anywhere in the interview ---------------------------
     flag_counts: dict[str, int] = {}

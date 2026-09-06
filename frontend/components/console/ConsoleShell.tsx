@@ -1,6 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
+import { SignOutButton } from '@/components/ui/AuthGate';
+import { getSupabase } from '@/lib/supabaseClient';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Bell, BookOpen, BriefcaseBusiness, ChevronDown, CircleHelp, FileBarChart, LayoutDashboard, PlayCircle, Plus, Search, Settings, Users, Video } from 'lucide-react';
@@ -23,6 +26,22 @@ function routeIsActive(pathname: string, href: string) {
 }
 
 export function ConsoleShell({ title, subtitle, actions, eyebrow, breadcrumb, children, flush = false }: { title?: string; subtitle?: string; actions?: ReactNode; eyebrow?: string; breadcrumb?: string; children: ReactNode; flush?: boolean }) {
+  // The console header used to hardcode a name that belonged to nobody.
+  const [operator, setOperator] = useState<string>('');
+  useEffect(() => {
+    let active = true;
+    getSupabase().auth.getUser()
+      .then(({ data }) => {
+        if (!active) return;
+        const u = data.user;
+        const meta = (u?.user_metadata ?? {}) as Record<string, unknown>;
+        const named = typeof meta.display_name === 'string' ? meta.display_name
+          : typeof meta.full_name === 'string' ? meta.full_name : '';
+        setOperator(named.trim() || (u?.email ?? '').split('@')[0] || '');
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
   const pathname = usePathname();
   const interviewMatch = pathname.match(/^\/enterprise\/interviews\/([^/]+)$/);
   const testPanelId = interviewMatch?.[1];
@@ -45,7 +64,7 @@ export function ConsoleShell({ title, subtitle, actions, eyebrow, breadcrumb, ch
           {testPanelId && <button onClick={()=>window.open(`/enterprise/interviews/${testPanelId}/test`,'recruitpro-interview-test','popup=yes,width=1400,height=900,left=40,top=40,resizable=yes,scrollbars=yes')} className="ml-auto inline-flex h-10 items-center gap-2 rounded-lg border border-[#d9dce1] bg-white px-4 text-sm font-semibold hover:border-black"><PlayCircle size={17}/> Test interview</button>}
           <div className={`relative hidden w-[300px] md:block ${testPanelId?'ml-3':'ml-auto'}`}><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b9098]" /><input aria-label="Search" placeholder="Search candidates, interviews..." className="h-10 w-full rounded-lg border border-[#e2e5e9] bg-[#f8f9fa] pl-9 pr-3 text-sm outline-none focus:border-black" /></div>
           <Link href="/enterprise/notifications" aria-label="Notifications" className="relative ml-4 grid size-10 place-items-center rounded-full border border-[#e2e5e9]"><Bell size={18}/><span className="absolute right-2 top-2 size-1.5 rounded-full bg-red-500"/></Link>
-          <button className="ml-3 flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium"><span className="grid size-8 place-items-center rounded-full bg-[#d9e7ff] text-xs font-bold">AR</span><span className="hidden xl:inline">Alex Rivera</span><ChevronDown size={14}/></button>
+          <div className="ml-3 flex items-center gap-2"><span className="grid size-8 place-items-center rounded-full bg-[#d9e7ff] text-xs font-bold">{(operator||'?').charAt(0).toUpperCase()}</span><span className="hidden text-sm font-medium xl:inline">{operator||'Account'}</span><SignOutButton/></div>
         </header>
         <main className={flush ? '' : 'mx-auto max-w-[1440px] px-5 py-7 lg:px-9 lg:py-9'}>
           {!flush && (title || subtitle || actions) && <div className="mb-8 flex flex-wrap items-start justify-between gap-5"><div>{(eyebrow || breadcrumb) && <p className="mb-2 text-[11px] font-semibold uppercase tracking-[.14em] text-[#737780]">{eyebrow || breadcrumb}</p>}{title && <h1 className="font-serif text-3xl font-bold tracking-tight lg:text-[38px]">{title}</h1>}{subtitle && <p className="mt-2 max-w-2xl text-sm leading-6 text-[#666b73]">{subtitle}</p>}</div>{actions && <div className="flex flex-wrap items-center gap-3">{actions}</div>}</div>}

@@ -17,6 +17,10 @@ class CompetencyResult(BaseModel):
     covered: bool
     checked_by: list[str] = Field(default_factory=list)   # agent names
     used_default_rule: bool = False # true when no Scorer rule existed for it
+    # False when no answer was ever scored against this competency. Readers must
+    # not plot or average these - a 0 here means "not asked", not "failed".
+    # Defaults True so reports written before this field still render.
+    assessed: bool = True
 
 
 class AgentReport(BaseModel):

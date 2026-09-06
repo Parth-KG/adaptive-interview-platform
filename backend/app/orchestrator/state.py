@@ -15,6 +15,16 @@ HostPhase = Literal["intake", "interview", "closing", "finished"]
 class CompetencyScore(BaseModel):
     score: float = 0.0          # 0-1, current best score for this competency
     covered: bool = False        # score >= scorer threshold for this competency
+    # False ONLY for the placeholder seed_agent_states() creates before the
+    # interview starts. Without this flag a competency nobody was ever asked
+    # about is indistinguishable from one the candidate scored 0 on - which
+    # plotted phantom zeros on the skill matrix and dragged the overall score
+    # down for every agent that never got a turn.
+    #
+    # Defaults True so a score that exists at all is presumed real: previously
+    # serialised session state and any directly-constructed CompetencyScore keep
+    # counting, and only the explicit seeding path opts out.
+    assessed: bool = True
 
 
 class AgentSessionState(BaseModel):

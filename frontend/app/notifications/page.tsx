@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { AuthGate } from '@/components/ui/AuthGate';
 import { PracticeShell } from '@/components/practice/PracticeShell';
 import { NOTIFICATIONS } from '@/lib/mockData';
 
@@ -13,6 +14,14 @@ const TINT = {
 };
 
 export default function NotificationsPage() {
+  return (
+    <AuthGate role="individual">
+      <NotificationsPageContent />
+    </AuthGate>
+  );
+}
+
+function NotificationsPageContent() {
   const [items, setItems] = useState(NOTIFICATIONS);
   const [tab, setTab] = useState<'All' | 'Unread'>('All');
 

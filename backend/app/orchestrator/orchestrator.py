@@ -50,7 +50,9 @@ def seed_agent_states(state: SessionState, panel: Panel) -> None:
     for agent in panel.agents:
         agent_state = state.get_agent_state(agent.id)
         for competency in agent.scoring.competencies:
-            agent_state.competency_scores.setdefault(competency, CompetencyScore())
+            # assessed=False marks this as a placeholder, not a scored zero.
+            agent_state.competency_scores.setdefault(
+                competency, CompetencyScore(assessed=False))
 
 
 def apply_score_result(
@@ -70,11 +72,13 @@ def apply_score_result(
     )
     for competency, score in result.competency_scores.items():
         existing = agent_state.competency_scores.get(competency)
+        score = max(0.0, min(1.0, float(score)))
         best_score = max(score, existing.score if existing else 0.0)
         threshold = scorer_thresholds.get(competency, 0.7)  # sensible default if not found
         agent_state.competency_scores[competency] = CompetencyScore(
             score=best_score,
             covered=best_score >= threshold,
+            assessed=True,
         )
     if count_turn:
         state.current_visit_turn_count += 1

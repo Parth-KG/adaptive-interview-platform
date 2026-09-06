@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AuthGate } from '@/components/ui/AuthGate';
 import { PracticeShell } from '@/components/practice/PracticeShell';
 import { usePlayer } from '@/hooks/usePlayer';
 import {
@@ -17,6 +18,14 @@ import {
  * and puts a new player within reach of the top on their first day.
  */
 export default function LeaderboardPage() {
+  return (
+    <AuthGate role="individual">
+      <LeaderboardPageContent />
+    </AuthGate>
+  );
+}
+
+function LeaderboardPageContent() {
   const { profile, signedIn, loading: playerLoading } = usePlayer();
   const [standing, setStanding] = useState<LeagueStanding | null>(null);
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
@@ -48,6 +57,9 @@ export default function LeaderboardPage() {
   }, [standing?.cohortId]);
 
   const visible = rows.filter(row => !find.trim() || row.display_name.toLowerCase().includes(find.toLowerCase()));
+  // Read your own numbers from the cohort row, and fall back to the same
+  // string the row projection uses. The card said "You" while the row directly
+  // beneath it said "Anonymous learner" for the same blank display name.
   const me = rows.find(row => row.you);
   const progress = levelProgress(profile.total_xp);
 
@@ -87,14 +99,14 @@ export default function LeaderboardPage() {
         <div className="mb-6 flex items-center gap-5">
           <div className="relative">
             <div className="grid h-20 w-20 place-items-center rounded-full bg-[var(--color-practice-accent)] text-2xl font-bold text-white">
-              {(profile.display_name || 'Y').charAt(0).toUpperCase()}
+              {(profile.display_name?.trim() || 'Anonymous learner').charAt(0).toUpperCase()}
             </div>
             <span className="absolute -bottom-1 -right-1 grid h-8 w-8 place-items-center rounded-full bg-[var(--color-practice-xp)] text-xs font-bold text-white ring-4 ring-[var(--color-practice-sunken)]">
               {progress.level}
             </span>
           </div>
           <div>
-            <h2 className="text-2xl font-extrabold">{profile.display_name?.trim() || 'You'}</h2>
+            <h2 className="text-2xl font-extrabold">{profile.display_name?.trim() || 'Anonymous learner'}</h2>
             <p className="font-medium text-[var(--color-practice-accent)]">
               {profile.is_premium ? 'Premium member' : 'Free plan'}
             </p>

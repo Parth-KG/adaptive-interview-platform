@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { AuthGate } from '@/components/ui/AuthGate';
+import { getSupabase } from '@/lib/supabaseClient';
 import { PracticeShell } from '@/components/practice/PracticeShell';
 import { usePlayer } from '@/hooks/usePlayer';
 import { updateDisplayName } from '@/lib/gamification';
@@ -9,7 +11,25 @@ const TABS = ['Profile', 'Notifications', 'Practice', 'Account'] as const;
 type Tab = typeof TABS[number];
 
 export default function SettingsPage() {
+  return (
+    <AuthGate role="individual">
+      <SettingsPageContent />
+    </AuthGate>
+  );
+}
+
+function SettingsPageContent() {
   const { profile, refresh } = usePlayer();
+  // Email is owned by Supabase Auth, not by the profile form. It was a
+  // hardcoded literal that could never match the person signed in.
+  const [email, setEmail] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    getSupabase().auth.getUser()
+      .then(({ data }) => { if (active) setEmail(data.user?.email ?? null); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
   // The field was uncontrolled with a dead Save button, so a name typed here
   // went nowhere. Derived rather than copied into state by an effect: null
   // means "untouched, show whatever the profile says", which also means a
@@ -66,7 +86,7 @@ export default function SettingsPage() {
               </label>
               <Field label="Headline" defaultValue={profile.is_premium ? "Premium member" : "Free plan"} />
               <Field label="Target role" defaultValue="" />
-              <Field label="Email" defaultValue="alex@example.com" type="email" />
+              <Field label="Email" defaultValue={email ?? '\u2014'} type="email" readOnly />
               <Save onClick={() => void saveName()} busy={saveState === 'saving'} />
             </Panel>
           )}
@@ -152,15 +172,21 @@ function Panel({ title, children, danger }:
   );
 }
 
-function Field({ label, defaultValue, type = 'text' }:
-  { label: string; defaultValue: string; type?: string }) {
+function Field({ label, defaultValue, type = 'text', readOnly = false }:
+  { label: string; defaultValue: string; type?: string; readOnly?: boolean }) {
   return (
     <label className="block">
       <span className="block text-sm font-semibold mb-2">{label}</span>
-      <input type={type} defaultValue={defaultValue}
-             className="w-full px-4 py-3 rounded-[var(--radius-control)] text-sm
+      <input type={type} defaultValue={defaultValue} readOnly={readOnly} key={defaultValue}
+             className={`w-full px-4 py-3 rounded-[var(--radius-control)] text-sm
                         bg-[var(--color-practice-bg)]
-                        border border-[var(--color-practice-border)]" />
+                        border border-[var(--color-practice-border)]
+                        ${readOnly ? 'cursor-not-allowed text-[var(--color-practice-ink-mute)]' : ''}`} />
+      {readOnly && (
+        <span className="mt-1.5 block text-xs text-[var(--color-practice-ink-mute)]">
+          Managed by your sign-in account.
+        </span>
+      )}
     </label>
   );
 }

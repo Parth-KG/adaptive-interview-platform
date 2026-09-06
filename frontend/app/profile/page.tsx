@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AuthGate } from '@/components/ui/AuthGate';
 import { PracticeShell } from '@/components/practice/PracticeShell';
 import { usePlayer } from '@/hooks/usePlayer';
 import {
@@ -9,6 +10,14 @@ import {
 } from '@/lib/gamification';
 
 export default function ProfilePage() {
+  return (
+    <AuthGate role="individual">
+      <ProfilePageContent />
+    </AuthGate>
+  );
+}
+
+function ProfilePageContent() {
   const { profile, signedIn, loading } = usePlayer();
   const [trophies, setTrophies] = useState<Trophy[]>([]);
   const [prices, setPrices] = useState<Partial<Record<GemSpend, number>>>({});

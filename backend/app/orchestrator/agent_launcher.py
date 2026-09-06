@@ -417,6 +417,7 @@ def swap_agent_persona(
     new_agent: PanelAgent,
     voice_id: str | None = None,
     language: str | None = None,
+    boundary_instruction: str = "",
 ) -> None:
     """Hot-swaps the persona on an ALREADY RUNNING session - no new Join call,
     same live Agora instance, per the single-agent-persona-swap decision.
@@ -438,7 +439,8 @@ def swap_agent_persona(
     properties: dict = {
         "llm": {
             "system_messages": [
-                {"role": "system", "content": build_system_prompt_from_agent(new_agent, language)}
+                {"role": "system", "content": build_system_prompt_from_agent(
+                    new_agent, language, boundary_instruction)}
             ],
             "greeting_message": resolve_greeting(new_agent, language),
             "failure_message": resolve_fallback(new_agent, language),
