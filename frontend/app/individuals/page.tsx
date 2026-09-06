@@ -69,9 +69,9 @@ export default function IndividualsLanding() {
               <span className="w-11 h-11 rounded-full grid place-items-center text-white
                                font-bold bg-[var(--color-practice-accent)]">A</span>
               <div>
-                <div className="font-bold text-sm">Alex Johnson</div>
+                <div className="font-bold text-sm">Your name</div>
                 <div className="text-xs text-[var(--color-practice-accent)]">
-                  Level 12 · Senior SWE track
+                  Level 12 · your track
                 </div>
               </div>
             </div>

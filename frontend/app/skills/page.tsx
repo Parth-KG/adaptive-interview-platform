@@ -1,10 +1,19 @@
 'use client';
 
 import Link from 'next/link';
+import { AuthGate } from '@/components/ui/AuthGate';
 import { PracticeShell } from '@/components/practice/PracticeShell';
 import { SKILL_PATHS } from '@/lib/mockData';
 
 export default function SkillPathsPage() {
+  return (
+    <AuthGate role="individual">
+      <SkillPathsPageContent />
+    </AuthGate>
+  );
+}
+
+function SkillPathsPageContent() {
   const featured = SKILL_PATHS.find((p) => p.featured);
   const rest = SKILL_PATHS.filter((p) => !p.featured);
 

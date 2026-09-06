@@ -2,7 +2,7 @@ import { supabase } from './supabaseClient';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
 
-export interface CompetencyResult { name:string; score:number; threshold:number; weight:number; covered:boolean; checked_by:string[]; used_default_rule:boolean }
+export interface CompetencyResult { name:string; score:number; threshold:number; weight:number; covered:boolean; checked_by:string[]; used_default_rule:boolean; assessed?:boolean }
 export interface AgentReport { agent_id:string; name:string; role:string; visits:number; questions_answered:number; satisfaction:number; score?:number; weight?:number; force_closed:boolean; competencies:string[]; knowledge_questions_asked:number; knowledge_questions_total:number }
 export interface TranscriptEntry { turn:number; speaker:string; agent_id:string; agent_name:string; text:string; flags:string[]; coverage:number|null; knowledge_item_id:string|null; question_score?:number|null; assessment_satisfaction?:number|null }
 export interface ReportTotals { overall_score:number; band:string; competencies_total:number; competencies_covered:number; coverage_rate:number; knowledge_coverage:number|null; questions_answered:number; flags:Record<string,number> }
@@ -87,7 +87,13 @@ function evidenceFor(report:InterviewReport, competency:string, strong:boolean, 
 }
 
 export function presentation(report:InterviewReport, roleName?:string) {
-  const sorted=[...report.competencies].sort((a,b)=>b.score-a.score);
+  // Legacy and partially-migrated rows arrive with missing keys. This used to
+  // spread report.competencies straight away and throw "not iterable", which
+  // blanked the whole report page.
+  const allCompetencies=Array.isArray(report?.competencies)?report.competencies:[];
+  // A competency nobody was asked about scores 0 by construction. Calling that
+  // a growth area invents a weakness the interview never observed.
+  const sorted=[...allCompetencies.filter(item=>item.assessed!==false)].sort((a,b)=>b.score-a.score);
   // One shared set, so no turn is quoted twice across the report.
   const quoted=new Set<number>();
   const strengths=sorted.filter(item=>item.covered).slice(0,3).map(item=>`${item.name} was a demonstrated strength (${scoreText(item.score)}).${evidenceFor(report,item.name,true,quoted)}`);
@@ -183,8 +189,21 @@ export async function listReports(source?:ReportSource):Promise<ReportSummary[]>
 export async function loadReportRecord(id:string):Promise<ReportRecord> {
   const {data,error}=await supabase.from('interview_reports').select(`${SUMMARY_COLUMNS},executive_summary,strengths,growth_areas,report`).eq('id',id).single();
   if(error) throw new Error(`Could not open that report: ${error.message}`);
-  const row=data as ReportRecord; const fallback=presentation(row.report,row.role_name);
-  return {...row,role_name:row.role_name||fallback.role,recommendation:row.recommendation||fallback.recommendation,executive_summary:row.executive_summary||fallback.summary,strengths:row.strengths?.length?row.strengths:fallback.strengths,growth_areas:row.growth_areas?.length?row.growth_areas:fallback.growth};
+  const row=data as ReportRecord;
+  const complete=Boolean(row.role_name&&row.recommendation&&row.executive_summary&&row.strengths?.length&&row.growth_areas?.length);
+  // Only derive when something is actually missing. presentation() reads deep
+  // into the stored JSON, and computing it for every row meant one malformed
+  // legacy document broke reports that needed no fallback at all.
+  let fallback:ReturnType<typeof presentation>|null=null;
+  if(!complete){ try{ fallback=presentation(row.report,row.role_name); }catch{ fallback=null; } }
+  return {
+    ...row,
+    role_name:row.role_name||fallback?.role||row.panel_name||'',
+    recommendation:row.recommendation||fallback?.recommendation||'Needs Review',
+    executive_summary:row.executive_summary||fallback?.summary||'',
+    strengths:row.strengths?.length?row.strengths:(fallback?.strengths??[]),
+    growth_areas:row.growth_areas?.length?row.growth_areas:(fallback?.growth??[]),
+  };
 }
 
 export async function loadReport(id:string):Promise<InterviewReport> { return (await loadReportRecord(id)).report; }
@@ -198,13 +217,26 @@ export async function queryCandidateReports(query:ReportQuery):Promise<RankedRep
     return ((data??[]) as ReportSummary[]).map(row=>({...row,matched_score:row.overall_score,matched_metric:'Overall score'}));
   }
   const key=normalizedKey(query.competency??'');
-  let request=supabase.from('interview_report_scores').select(`score,competency_name,interview_reports!inner(${SUMMARY_COLUMNS})`).eq('competency_key',key).order('score',{ascending:false}).limit(limit);
+  // An empty key matches nothing and reads to the user as "no results" rather
+  // than "I did not understand which competency you meant".
+  if(!key) return [];
+  let request=supabase.from('interview_report_scores')
+    .select(`score,competency_name,interview_reports!inner(${SUMMARY_COLUMNS})`)
+    // Same pool as the overall ranking above. Without this, "top 5 overall"
+    // excluded abandoned interviews while "top 5 by system design" included
+    // them, so the two lists disagreed about the same candidates.
+    .eq('interview_reports.completed',true)
+    .eq('competency_key',key).order('score',{ascending:false}).limit(limit);
   if(query.role) request=request.ilike('interview_reports.role_name',`%${query.role}%`);
   const {data,error}=await request; if(error) throw new Error(`Could not query competency scores: ${error.message}`);
-  return (data??[]).map((item:Record<string,unknown>)=>{
-    const nested=(Array.isArray(item.interview_reports)?item.interview_reports[0]:item.interview_reports) as ReportSummary;
-    return {...nested,matched_score:Number(item.score),matched_metric:String(item.competency_name)};
-  });
+  return (data??[])
+    .map((item:Record<string,unknown>)=>{
+      const nested=(Array.isArray(item.interview_reports)?item.interview_reports[0]:item.interview_reports) as ReportSummary|undefined;
+      if(!nested?.id) return null;   // join returned nothing usable - drop the row
+      const raw=Number(item.score);
+      return {...nested,matched_score:Number.isFinite(raw)?raw:null,matched_metric:String(item.competency_name??'')};
+    })
+    .filter((row):row is RankedReport=>row!==null);
 }
 
 /* ------------------------------------------------- skill-path (DSA) reports --- */

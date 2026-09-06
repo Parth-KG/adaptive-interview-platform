@@ -1,6 +1,7 @@
 'use client';
 
 import { usePlayer } from '@/hooks/usePlayer';
+import { SignOutButton } from '@/components/ui/AuthGate';
 
 import React from 'react';
 import Link from 'next/link';
@@ -154,6 +155,10 @@ export function PracticeShell({
                              hover:brightness-110 transition">
             Upgrade to Pro
           </button>
+
+          <div className="mt-3 flex justify-center">
+            <SignOutButton />
+          </div>
         </aside>
 
         <main className="flex-1 min-w-0">{children}</main>

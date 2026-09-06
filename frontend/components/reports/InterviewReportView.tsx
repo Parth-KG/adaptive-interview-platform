@@ -19,19 +19,41 @@ import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { ConsoleCard } from '@/components/console/ConsoleShell';
 import type { ReportRecord, TranscriptEntry } from '@/lib/reports';
 
-export const percent = (value: number | null) => (value === null ? '—' : String(Math.round(value * 100)));
+export const percent = (value: number | null | undefined) =>
+  (typeof value === 'number' && Number.isFinite(value) ? String(Math.round(value * 100)) : '—');
+
+/** "en-US" is a locale code, not a language. Show the language. */
+function languageLabel(code: string | undefined): string {
+  if (!code) return '—';
+  try {
+    const base = code.split('-')[0];
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(base) ?? code;
+  } catch { return code; }
+}
 export const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'CA';
 
 export function InterviewReportView({ record }: { record: ReportRecord }) {
   const report = record.report;
-  const skills = report.competencies.map(item => [item.name, Math.round(item.score * 100)] as [string, number]);
-  const agents = report.agents;
-  const started = Date.parse(report.started_at);
-  const finished = Date.parse(report.finished_at);
+  const competencies = Array.isArray(report?.competencies) ? report.competencies : [];
+  // Plot only what was actually assessed. seed_agent_states() pre-creates a 0.0
+  // placeholder for every declared competency, so an interview that ended early
+  // drew a polygon collapsed to the centre - a candidate who ran out of time
+  // looked identical to one who failed everything.
+  const measured = competencies.filter(item => item.assessed !== false);
+  const unmeasured = competencies.length - measured.length;
+  const skills = measured.map(item => ({
+    name: item.name,
+    score: Math.round(Math.max(0, Math.min(1, item.score)) * 100),
+    threshold: Math.round(Math.max(0, Math.min(1, item.threshold ?? 0.7)) * 100),
+    covered: item.covered,
+  }));
+  const agents = Array.isArray(report?.agents) ? report.agents : [];
+  const started = Date.parse(report?.started_at ?? '');
+  const finished = Date.parse(report?.finished_at ?? '');
   const duration = Number.isFinite(started) && Number.isFinite(finished)
     ? Math.max(0, Math.round((finished - started) / 60000))
-    : 0;
+    : null;
 
   return (
     <>
@@ -45,8 +67,9 @@ export function InterviewReportView({ record }: { record: ReportRecord }) {
               <h1 className="font-serif text-4xl font-bold">{record.candidate_name || 'Unnamed candidate'}</h1>
               <p className="mt-1 text-lg text-[#555a62]">{record.role_name || record.panel_name}<br />Candidate</p>
               <div className="mt-4 flex flex-wrap gap-3">
-                <StatusPillLocal tone={record.band === 'Strong' ? 'green' : 'blue'}>
-                  {record.recommendation.toUpperCase()}
+                <StatusPillLocal tone={record.band === 'Strong' ? 'green'
+                  : record.band === 'Solid' ? 'blue' : 'amber'}>
+                  {(record.recommendation || 'Needs Review').toUpperCase()}
                 </StatusPillLocal>
                 <span className="rounded-md bg-[#eff1f3] px-3 py-1.5 text-xs font-semibold">{record.candidate_ref}</span>
               </div>
@@ -99,10 +122,10 @@ export function InterviewReportView({ record }: { record: ReportRecord }) {
             <h2 className="font-serif text-xl font-bold">Interview details</h2>
             <dl className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
               {([
-                ['Duration', `${duration} minutes`],
-                ['Questions', `${report.totals.questions_answered} answered`],
+                ['Duration', duration === null ? '—' : `${duration} minutes`],
+                ['Questions', `${report?.totals?.questions_answered ?? 0} answered`],
                 ['Completion', record.completed ? 'Completed' : 'Ended early'],
-                ['Language', report.language],
+                ['Language', languageLabel(report?.language)],
               ] as [string, string][]).map(item => (
                 <div key={item[0]} className="flex justify-between border-b border-[#e6e8eb] pb-3">
                   <dt className="text-[#747981]">{item[0]}</dt>
@@ -115,6 +138,12 @@ export function InterviewReportView({ record }: { record: ReportRecord }) {
         <ConsoleCard className="p-7">
           <h2 className="text-center font-serif text-2xl font-bold">Skill Matrix</h2>
           <div className="mt-10"><SkillRadar skills={skills} /></div>
+          {unmeasured > 0 && (
+            <p className="mt-6 text-center text-xs text-[#777c84]">
+              {unmeasured} further {unmeasured === 1 ? 'competency was' : 'competencies were'} configured
+              but never assessed, so {unmeasured === 1 ? 'it is' : 'they are'} not plotted.
+            </p>
+          )}
         </ConsoleCard>
       </div>
 
@@ -213,30 +242,106 @@ function EvidenceCard({ title, items, strength = false }: { title: string; items
   );
 }
 
-function SkillRadar({ skills }: { skills: [string, number][] }) {
-  if (!skills.length) return <p className="text-center text-sm text-[#777c84]">No competency scores were recorded.</p>;
-  const points = skills.map(([, score], index) => {
-    const angle = -Math.PI / 2 + index * Math.PI * 2 / skills.length;
-    const radius = score * .95;
-    return `${120 + Math.cos(angle) * radius},${120 + Math.sin(angle) * radius}`;
-  }).join(' ');
+interface Skill { name: string; score: number; threshold: number; covered: boolean }
+
+/**
+ * The skill matrix.
+ *
+ * A radar needs at least three axes to enclose an area - with one competency the
+ * old version drew a single point (nothing visible) and with two a degenerate
+ * line. Under three, this falls back to bars, which read better anyway.
+ *
+ * Both forms show the configured threshold, because a score is only meaningful
+ * against the bar it had to clear: 0.65 and 0.75 look identical without it.
+ */
+function SkillRadar({ skills }: { skills: Skill[] }) {
+  if (!skills.length) {
+    return (
+      <p className="text-center text-sm text-[#777c84]">
+        No competency was assessed in this interview.
+      </p>
+    );
+  }
+  if (skills.length < 3) return <SkillBars skills={skills} />;
+
+  const R = 82;
+  const C = 150;
+  const at = (index: number, radius: number) => {
+    const angle = -Math.PI / 2 + (index * Math.PI * 2) / skills.length;
+    return [C + Math.cos(angle) * radius, C + Math.sin(angle) * radius] as const;
+  };
+  const poly = skills.map((s, i) => at(i, (s.score / 100) * R).join(',')).join(' ');
+  const thresholdPoly = skills.map((s, i) => at(i, (s.threshold / 100) * R).join(',')).join(' ');
+
   return (
     <div>
-      <svg viewBox="0 0 240 240" className="mx-auto w-full max-w-[250px]" aria-label="Candidate skill matrix">
-        {[95, 68, 40].map(radius => <circle key={radius} cx="120" cy="120" r={radius} fill="none" stroke="#d9dde2" />)}
-        {skills.map((_, index) => {
-          const angle = -Math.PI / 2 + index * Math.PI * 2 / skills.length;
-          return <line key={index} x1="120" y1="120" x2={120 + Math.cos(angle) * 95} y2={120 + Math.sin(angle) * 95} stroke="#d9dde2" />;
-        })}
-        <polygon points={points} fill="rgba(0,0,0,.08)" stroke="#111" strokeWidth="2" />
-      </svg>
-      <div className="mt-3 flex flex-wrap justify-center gap-2">
-        {skills.map(([skill, score]) => (
-          <span key={skill} className="rounded border border-[#d8dce1] bg-[#f7f8fa] px-2 py-1 text-xs font-semibold">
-            {skill} · {score}
-          </span>
+      <svg viewBox="0 0 300 300" className="mx-auto w-full max-w-[330px]"
+           role="img" aria-label={`Skill matrix: ${skills.map(s => `${s.name} ${s.score} out of 100`).join(', ')}`}>
+        {[R, R * 0.72, R * 0.44].map(r => (
+          <circle key={r} cx={C} cy={C} r={r} fill="none" stroke="#d9dde2" />
         ))}
+        {skills.map((_, i) => {
+          const [x, y] = at(i, R);
+          return <line key={i} x1={C} y1={C} x2={x} y2={y} stroke="#d9dde2" />;
+        })}
+        <polygon points={thresholdPoly} fill="none" stroke="#b9772a" strokeWidth="1.5" strokeDasharray="4 3" />
+        <polygon points={poly} fill="rgba(17,17,17,.10)" stroke="#111" strokeWidth="2" />
+        {skills.map((s, i) => {
+          const [x, y] = at(i, (s.score / 100) * R);
+          return <circle key={s.name} cx={x} cy={y} r="3.5" fill={s.covered ? '#256134' : '#a4442f'} />;
+        })}
+        {skills.map((s, i) => {
+          const [x, y] = at(i, R + 20);
+          const anchor = Math.abs(x - C) < 6 ? 'middle' : x > C ? 'start' : 'end';
+          return (
+            <text key={s.name} x={x} y={y} textAnchor={anchor} dominantBaseline="middle"
+                  fontSize="10.5" fill="#555a62">
+              {s.name.length > 18 ? `${s.name.slice(0, 17)}\u2026` : s.name}
+            </text>
+          );
+        })}
+      </svg>
+      <div className="mt-4 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[11px] text-[#5f646c]">
+        <span className="flex items-center gap-1.5"><span className="inline-block h-0 w-4 border-t-2 border-[#111]" />Scored</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block h-0 w-4 border-t-2 border-dashed border-[#b9772a]" />Threshold</span>
       </div>
+      <SkillChips skills={skills} />
     </div>
   );
 }
+
+function SkillBars({ skills }: { skills: Skill[] }) {
+  return (
+    <div className="mx-auto max-w-[420px] space-y-5">
+      {skills.map(s => (
+        <div key={s.name}>
+          <div className="flex items-baseline justify-between text-sm">
+            <span className="font-semibold">{s.name}</span>
+            <span className="tabular-nums text-[#555a62]">{s.score}<small>/100</small></span>
+          </div>
+          <div className="relative mt-2 h-2.5 rounded-full bg-[#e6e8eb]">
+            <div className={`h-full rounded-full ${s.covered ? 'bg-[#256134]' : 'bg-[#a4442f]'}`} style={{ width: `${s.score}%` }} />
+            <span className="absolute top-[-3px] h-[16px] w-px bg-[#b9772a]" style={{ left: `${s.threshold}%` }} title={`Threshold ${s.threshold}`} />
+          </div>
+        </div>
+      ))}
+      <p className="pt-1 text-center text-[11px] text-[#777c84]">The vertical mark is the configured pass threshold.</p>
+    </div>
+  );
+}
+
+function SkillChips({ skills }: { skills: Skill[] }) {
+  return (
+    <div className="mt-4 flex flex-wrap justify-center gap-2">
+      {skills.map(s => (
+        <span key={s.name}
+              className={`rounded border px-2 py-1 text-xs font-semibold ${
+                s.covered ? 'border-[#bcd9c4] bg-[#f0f7f2] text-[#256134]'
+                          : 'border-[#e2c3bb] bg-[#fbf3f1] text-[#a4442f]'}`}>
+          {s.name} · {s.score}<span className="ml-1 font-normal opacity-70">/ {s.threshold}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
