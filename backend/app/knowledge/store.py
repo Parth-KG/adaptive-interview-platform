@@ -24,7 +24,7 @@ import re
 import uuid
 from collections import Counter
 
-from app.schemas.panel import KnowledgeItem
+from app.schemas.panel import KnowledgeItem, QuestionDomain, QuestionKind
 
 # Column aliases accepted in CSV/TSV/JSON uploads, lowercased and stripped of
 # non-alphanumerics before matching, so "Ideal Answer", "ideal_answer" and
@@ -36,6 +36,34 @@ _ANSWER_KEYS = {
 }
 _TAG_KEYS = {"tag", "tags", "topic", "topics", "category", "competency", "skill"}
 _DIFFICULTY_KEYS = {"difficulty", "level", "hardness", "complexity"}
+# Explicit ownership columns. Without these an uploaded question has no kind and
+# no domain, so both get guessed from its wording - which is how a behavioural
+# prompt ends up in front of the DSA interviewer. A declared value always wins.
+_KIND_KEYS = {"kind", "type", "format", "questionkind", "questiontype"}
+_DOMAIN_KEYS = {"domain", "area", "questiondomain", "discipline"}
+
+_KIND_ALIASES: dict[str, QuestionKind] = {
+    "coding": "coding", "code": "coding", "program": "coding", "programming": "coding",
+    "written": "written", "write": "written", "writing": "written", "text": "written",
+    "essay": "written", "pad": "written",
+    "verbal": "verbal", "spoken": "verbal", "oral": "verbal", "voice": "verbal",
+    "discussion": "verbal", "talk": "verbal",
+}
+
+_DOMAIN_ALIASES: dict[str, QuestionDomain] = {
+    "dsa": "dsa", "algorithm": "dsa", "algorithms": "dsa", "datastructures": "dsa",
+    "datastructuresandalgorithms": "dsa", "ds": "dsa", "dsaalgorithms": "dsa",
+    "systemdesign": "system_design", "design": "system_design",
+    "architecture": "system_design", "hld": "system_design", "scalability": "system_design",
+    "behavioural": "behavioural", "behavioral": "behavioural", "hr": "behavioural",
+    "culture": "behavioural", "culturefit": "behavioural", "leadership": "behavioural",
+    "communication": "behavioural", "teamwork": "behavioural", "people": "behavioural",
+    "product": "product", "productsense": "product", "pm": "product",
+    "prioritisation": "product", "prioritization": "product", "metrics": "product",
+    "customer": "customer", "client": "customer", "sales": "customer",
+    "support": "customer", "discovery": "customer",
+    "general": "general", "other": "general", "misc": "general",
+}
 
 _MAX_ITEMS = 500          # refuse absurd uploads rather than blow up a prompt
 _MAX_FIELD_CHARS = 4000   # one pathological cell shouldn't eat the context window
@@ -83,7 +111,21 @@ def _coerce_difficulty(value) -> int | None:
     return max(1, min(10, number))
 
 
-def _make_item(question: str, answer: str, tags, difficulty) -> KnowledgeItem | None:
+def _coerce_kind(value) -> QuestionKind | None:
+    key = re.sub(r"[^a-z]", "", str(value or "").lower())
+    return _KIND_ALIASES.get(key)
+
+
+def _coerce_domain(value) -> QuestionDomain | None:
+    key = re.sub(r"[^a-z_]", "", str(value or "").lower().replace(" ", ""))
+    return _DOMAIN_ALIASES.get(key.replace("_", "")) or (
+        key if key in {"dsa", "system_design", "behavioural", "product",
+                       "customer", "general"} else None
+    )
+
+
+def _make_item(question: str, answer: str, tags, difficulty,
+               kind=None, domain=None) -> KnowledgeItem | None:
     question = _clean(question)
     if not question:
         return None
@@ -93,6 +135,8 @@ def _make_item(question: str, answer: str, tags, difficulty) -> KnowledgeItem | 
         idealAnswer=_clean(answer),
         tags=_split_tags(tags),
         difficulty=_coerce_difficulty(difficulty),
+        kind=_coerce_kind(kind),
+        domain=_coerce_domain(domain),
     )
 
 
@@ -109,6 +153,10 @@ def _from_mapping(row: dict) -> KnowledgeItem | None:
             picked["tags"] = value
         elif key in _DIFFICULTY_KEYS and "difficulty" not in picked:
             picked["difficulty"] = value
+        elif key in _KIND_KEYS and "kind" not in picked:
+            picked["kind"] = value
+        elif key in _DOMAIN_KEYS and "domain" not in picked:
+            picked["domain"] = value
 
     if "question" not in picked:
         # Fall back to positional: first column is the question, second the answer.
@@ -124,6 +172,8 @@ def _from_mapping(row: dict) -> KnowledgeItem | None:
         picked.get("answer", ""),
         picked.get("tags"),
         picked.get("difficulty"),
+        picked.get("kind"),
+        picked.get("domain"),
     )
 
 

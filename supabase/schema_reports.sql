@@ -83,18 +83,31 @@ returns trigger language plpgsql security definer set search_path = public
 as $$
 begin
   delete from public.interview_report_scores where report_id = new.id;
+  -- distinct on the KEY, not the name.
+  --
+  -- Two competency names that normalise to the same key ("System Design" and
+  -- "system design", or "API Design" and "API-Design") used to reach a single
+  -- INSERT ... ON CONFLICT, which Postgres rejects with 21000 "ON CONFLICT DO
+  -- UPDATE command cannot affect row a second time". That aborts the trigger,
+  -- and because the trigger fires in the same transaction as the report write,
+  -- the candidate's entire report was lost. Nothing upstream constrains the
+  -- competency names the scoring model returns, so dedupe here.
+  --
+  -- Highest score wins, which matches the best-of roll-up in report.py.
+  -- Rows that were never assessed are skipped so they cannot pollute rankings.
   insert into public.interview_report_scores
     (report_id, user_id, competency_name, competency_key, score, threshold, weight, covered, checked_by)
-  select new.id, new.user_id, item->>'name', public.normalized_report_key(item->>'name'),
+  select distinct on (public.normalized_report_key(item->>'name'))
+         new.id, new.user_id, item->>'name', public.normalized_report_key(item->>'name'),
          greatest(0, least(1, coalesce((item->>'score')::numeric, 0))),
          greatest(0, least(1, coalesce((item->>'threshold')::numeric, 0.7))),
          coalesce((item->>'weight')::numeric, 1),
          coalesce((item->>'covered')::boolean, false), coalesce(item->'checked_by', '[]'::jsonb)
   from jsonb_array_elements(coalesce(new.report->'competencies', '[]'::jsonb)) item
   where nullif(item->>'name', '') is not null
-  on conflict (report_id, competency_key) do update set
-    competency_name=excluded.competency_name, score=excluded.score, threshold=excluded.threshold,
-    weight=excluded.weight, covered=excluded.covered, checked_by=excluded.checked_by;
+    and coalesce((item->>'assessed')::boolean, true)
+  order by public.normalized_report_key(item->>'name'),
+           coalesce((item->>'score')::numeric, 0) desc;
   return new;
 end;
 $$;
@@ -108,7 +121,13 @@ create trigger interview_reports_set_updated_at before update on public.intervie
 for each row execute function public.set_updated_at();
 
 -- Populate normalized scores for rows created before this migration.
-update public.interview_reports set report = report;
+-- Restricted to rows that have no score rows yet: the unconditional form
+-- rewrote every historical row on every migration run, bumping updated_at for
+-- all of them and re-firing the sync trigger across the whole table.
+update public.interview_reports r set report = r.report
+where not exists (
+  select 1 from public.interview_report_scores s where s.report_id = r.id
+);
 
 alter table public.interview_reports enable row level security;
 alter table public.interview_report_scores enable row level security;

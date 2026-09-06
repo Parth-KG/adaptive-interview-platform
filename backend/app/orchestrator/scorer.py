@@ -222,6 +222,15 @@ async def score_turn(
     parsed.setdefault("flags", [])
     parsed.setdefault("triggered_agent_ids", [])
     parsed["missing_points"] = parsed.get("missing_points") or []
+    # Clamp everything the model returns to its declared range. An out-of-range
+    # score propagates into overall_score, violates the 0-1 CHECK on
+    # interview_reports, and the whole report is rejected and lost.
+    parsed["competency_scores"] = {
+        str(name): max(0.0, min(1.0, float(value or 0.0)))
+        for name, value in (parsed.get("competency_scores") or {}).items()
+    }
+    if parsed.get("coverage") is not None:
+        parsed["coverage"] = max(0.0, min(1.0, float(parsed["coverage"])))
     parsed["answer_correct"] = bool(parsed.get("answer_correct", False))
     parsed["assessment_satisfaction"] = max(
         0.0, min(1.0, float(parsed.get("assessment_satisfaction") or 0.0))
