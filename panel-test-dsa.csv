@@ -1,3 +1,0 @@
-question,ideal_answer,tags,difficulty,kind,domain
-"What is the average time complexity of a hash map lookup, and when does it get worse?","O(1) on average. It degrades towards O(n) when many keys land in the same bucket - a weak hash function, a high load factor before resizing, or deliberately chosen colliding keys.","DSA;complexity",2,verbal,dsa
-"What is the difference between a stack and a queue? Give one use for each.","A stack is last-in first-out; a queue is first-in first-out. A stack suits undo history or depth-first traversal; a queue suits job scheduling or breadth-first traversal.","DSA;data structures",1,verbal,dsa
